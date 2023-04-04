@@ -3,15 +3,16 @@ from psycopg2._psycopg import AsIs
 from psycopg2.extensions import ISOLATION_LEVEL_AUTOCOMMIT
 import pandas as pd
 from sqlalchemy import create_engine
+import gc
 
-conn_string = 'postgresql://postgres:!QAZ2wsx@localhost:51432/assignment4'
+
+conn_string = 'postgresql://postgres:!QAZ2wsx@152.228.206.129:51432/assignment4'
 
 db = create_engine(conn_string)
-# connection = db.connect()
 
 # Connect to the PostgreSQL database
 conn = psycopg2.connect(
-    host="localhost",
+    host="152.228.206.129",
     port="51432",
     dbname="postgres",
     user="postgres",
@@ -34,7 +35,7 @@ else:
 
 # Connect to the assignment4 database
 conn = psycopg2.connect(
-    host="localhost",
+    host="152.228.206.129",
     port="51432",
     dbname="assignment4",
     user="postgres",
@@ -44,97 +45,103 @@ conn.set_isolation_level(ISOLATION_LEVEL_AUTOCOMMIT)
 print("connected to the assignment4 database")
 # Open a cursor to perform database operations
 cur = conn.cursor()
-# Check if the table exists else create a new one
-try:
-    cur.execute(
-        "CREATE TABLE IF NOT EXISTS TaxiTrips "
-        "(id serial PRIMARY KEY, "
-        "trip_id text, taxi_id text, "
-        "trip_start_timestamp timestamp, "
-        "trip_end_timestamp timestamp, "
-        "trip_seconds integer, "
-        "trip_miles float(8), "
-        "pickup_census_tract text, "
-        "dropoff_census_tract text, "
-        "pickup_community_area integer, "
-        "dropoff_community_area integer, "
-        "fare float(8), "
-        "tips float(8), "
-        "tolls float(8), "
-        "extras float(8), "
-        "trip_total float(8), "
-        "payment_type text, "
-        "company text, "
-        "pickup_centroid_latitude float(8), "
-        "pickup_centroid_longitude float(8), "
-        "dropoff_centroid_latitude float(8), "
-        "dropoff_centroid_longitude float(8));")
-except:
-    print("Error!")
+# # Check if the table exists else create a new one
+# try:
+#     cur.execute(
+#         "CREATE TABLE IF NOT EXISTS TaxiTrips "
+#         "(id serial PRIMARY KEY, "
+#         "trip_id text, taxi_id text, "
+#         "trip_start_timestamp timestamp, "
+#         "trip_end_timestamp timestamp, "
+#         "trip_seconds integer, "
+#         "trip_miles float(8), "
+#         "pickup_census_tract text, "
+#         "dropoff_census_tract text, "
+#         "pickup_community_area integer, "
+#         "dropoff_community_area integer, "
+#         "fare float(8), "
+#         "tips float(8), "
+#         "tolls float(8), "
+#         "extras float(8), "
+#         "trip_total float(8), "
+#         "payment_type text, "
+#         "company text, "
+#         "pickup_centroid_latitude float(8), "
+#         "pickup_centroid_longitude float(8), "
+#         "dropoff_centroid_latitude float(8), "
+#         "dropoff_centroid_longitude float(8));")
+# except:
+#     print("Error!")
 
-# conn.commit()
-
-# sql2 = '''COPY assignment4(Trip ID,Taxi ID,Data Type) FROM df DELIMITER ',' CSV HEADER;'''
-#
-# cur.execute(sql2)
-
-chunksize = 10 ** 8
+chunksize = 10 ** 6
 
 
 def process(chunk):
     chunk.to_sql('TaxiTrips', db, if_exists='replace')
+    gc.collect()
 
 
-# cur.execute("SELECT count(*) FROM TaxiTrips")
-cur.execute("select count(*) from %s", (AsIs('"TaxiTrips"'),))
-count = cur.fetchone()
+cur.execute("select * from information_schema.tables where %s='TaxiTrips'", (AsIs('"table_name"'),))
 
-if count[0] > 0:
+if bool(cur.rowcount):
+  print("table TaxiTrips exists!")
+  cur.execute("select count(*) from %s", (AsIs('"TaxiTrips"'),))
+  count = cur.fetchone()
+
+  if count[0] > 0:
     print("Data already exists")
+  else:
+    for chunk in pd.read_csv("/content/Taxi_Trips.csv", chunksize=chunksize, low_memory=False):
+        process(chunk)
 else:
-    for chunk in pd.read_csv("E:\\UNB\\GGE6505\\Assignments\\Taxi_Trips.csv", chunksize=chunksize, low_memory=False):
+  for chunk in pd.read_csv("/content/Taxi_Trips.csv", chunksize=chunksize, low_memory=False):
         process(chunk)
 
+
+# Do some changes in database (changing column 'Trip Start Timestamp' to TIMESTAMP)
+#cur.execute("alter table %s alter column %s SET DATA TYPE TIMESTAMP USING to_timestamp(%s, 'mm/dd/yyyy hh12:mi:ss') ", (AsIs('"TaxiTrips"'),AsIs('"Trip Start Timestamp"'),AsIs('"Trip Start Timestamp"'),))
+#print("Alter table finished")
+
 # Queries
-# 1. Query trips with a fare greater than $8000:
-cur.execute("select * from %s where %s > 8000", (AsIs('"TaxiTrips"'), AsIs('"Fare"')))
+# 1. Query trips with a fare greater than $500:
+cur.execute("select * from %s where %s > 500", (AsIs('"TaxiTrips"'), AsIs('"Fare"')))
 rows = cur.fetchall()
-print("1. Query trips with a fare greater than $8000:")
+print("\n\n1. Query trips with a fare greater than $500:\n")
 for row in rows:
     print(row)
 
 # 2. Query trips with a pickup location in a specific community area with a specific company:
-cur.execute("select * from %s where %s = 8 and %s = '303 Taxi'",
+cur.execute("select * from %s where %s = 8 and %s = '2733 - Benny Jona'",
             (AsIs('"TaxiTrips"'), AsIs('"Pickup Community Area"'), AsIs('"Company"')))
 rows = cur.fetchall()
-print("2. Query trips with a pickup location in a specific community area:")
+print("\n\n2. Query trips with a pickup location in a specific community area:\n")
 for row in rows:
     print(row)
 
-# 3. Get the total revenue generated by each taxi driver of a specific company in 2017:
-cur.execute("select %s, SUM(%s) as total_revenue from %s where %s = '303 Taxi' and %s > '2017-01-01'::TIMESTAMP and %s < '2018-01-01'::TIMESTAMP group by %s order by total_revenue desc",
+# 3. Get the total revenue generated by the top 10 of taxi drivers of a specific company in 2017:
+cur.execute("select %s, SUM(%s) as total_revenue from %s where %s = '303 Taxi' and %s > '2017-01-01'::TIMESTAMP and %s < '2018-01-01'::TIMESTAMP group by %s order by total_revenue desc limit 10",
             (AsIs('"Taxi ID"'), AsIs('"Trip Total"'), AsIs('"TaxiTrips"'), AsIs('"Company"'), AsIs('"Trip Start Timestamp"'), AsIs('"Trip Start Timestamp"'), AsIs('"Taxi ID"')))
 
 rows = cur.fetchall()
-print("3. Get the total revenue generated by each taxi driver of a specific company in 2017:")
+print("\n\n3. Get the total revenue generated by each taxi driver of a specific company in 2017:\n")
 for row in rows:
     print(row)
 
-# 4. Get the number of trips taken by each taxi driver in the month of January 2022:
-cur.execute("select %s, count(*) as trip_count from %s where EXTRACT(MONTH FROM %s) = 1 and EXTRACT(YEAR FROM %s) = 2022 group by %s order by trip_count desc",
+# 4. Get the number of trips taken by the top 10 of taxi drivers in the month of June 2014:
+cur.execute("select %s, count(*) as trip_count from %s where EXTRACT(MONTH FROM %s) = 6 and EXTRACT(YEAR FROM %s) = 2014 group by %s order by trip_count desc limit 10",
             (AsIs('"Taxi ID"'), AsIs('"TaxiTrips"'), AsIs('"Trip Start Timestamp"'), AsIs('"Trip Start Timestamp"'), AsIs('"Taxi ID"')))
 
 rows = cur.fetchall()
-print("4. Get the number of trips taken by each taxi driver in the month of January 2022:")
+print("\n\n4. Get the number of trips taken by each taxi driver in the month of June 2014:\n")
 for row in rows:
     print(row)
 
-# 5. Get the total number of trips taken by each payment type (cash or credit card) in the year 2021:
-cur.execute("select %s, count(*) as trip_count from %s where EXTRACT(YEAR FROM %s) = 2021 group by %s order by trip_count desc",
+# 5. Get the total number of trips taken by each payment type (cash or credit card) in the year 2015:
+cur.execute("select %s, count(*) as trip_count from %s where EXTRACT(YEAR FROM %s) = 2015 group by %s order by trip_count desc",
             (AsIs('"Payment Type"'), AsIs('"TaxiTrips"'), AsIs('"Trip Start Timestamp"'), AsIs('"Payment Type"')))
 
 rows = cur.fetchall()
-print("5. Get the total number of trips taken by each payment type (cash or credit card) in the year 2021:")
+print("\n\n5. Get the total number of trips taken by each payment type (cash or credit card) in the year 2015:\n")
 for row in rows:
     print(row)
 
